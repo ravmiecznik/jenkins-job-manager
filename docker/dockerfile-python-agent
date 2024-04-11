@@ -1,0 +1,12 @@
+FROM jenkins/inbound-agent:latest
+
+USER root
+
+# Install Python 3 and tools
+RUN apt-get update
+RUN apt-get install -y python3.11 python3.11-dev python3.11-distutils python3-pip
+RUN apt install -y python3-pytest python3-flake8 pylint python3-mypy
+
+CMD /usr/bin/bash
+
+USER jenkins
