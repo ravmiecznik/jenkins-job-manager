@@ -1,8 +1,8 @@
 version: '3.8'
 services:
-  jenkins:
+  jenkins-master:
     image: jenkins/jenkins:lts
-    container_name: jenkins-controller
+    container_name: jenkins-master
     ports:
       - "8080:8080"
       - "50000:50000"
@@ -12,6 +12,25 @@ services:
       - JENKINS_OPTS=--prefix=/jenkins
     restart: unless-stopped
 
+  jenkins-agent:
+    image: jenkins/inbound-agent:latest
+    container_name: jenkins-agent1
+    depends_on:
+      - jenkins-master
+    environment:
+      - JENKINS_URL=http://jenkins-master:8080/jenkins
+      - JENKINS_AGENT_NAME=agent1
+      - JENKINS_AGENT_SECRET=6962729d601d01c6b9f55390567cf4f1b81b0e1f6c889cbcfe747f745dd6d1ba
+      - JENKINS_AGENT_WORKDIR=/home/jenkins/agent
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - jenkins_agent_home:/home/jenkins/agent
+    command: -url http://jenkins-master:8080 6962729d601d01c6b9f55390567cf4f1b81b0e1f6c889cbcfe747f745dd6d1ba agent1
+    tty: true
+    stdin_open: true
+    restart: unless-stopped
+
 volumes:
   jenkins_home:
+  jenkins_agent_home:
 
