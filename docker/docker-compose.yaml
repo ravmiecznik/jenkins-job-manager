@@ -1,7 +1,8 @@
 version: '3.8'
 services:
   jenkins-master:
-    image: jenkins/jenkins:lts
+    # repo digest sha256:1fd79ceb68ce883fb86db70bdbf7f9eaa8b25e580aafe7a240235240396e3916 corresponds to tag 'lts' on 13.04.2024
+    image: jenkins/jenkins@sha256:1fd79ceb68ce883fb86db70bdbf7f9eaa8b25e580aafe7a240235240396e3916
     container_name: jenkins-master
     ports:
       - "8080:8080"
@@ -13,19 +14,16 @@ services:
     restart: unless-stopped
 
   jenkins-agent:
-    image: jenkins/inbound-agent:latest
     container_name: jenkins-agent1
     depends_on:
       - jenkins-master
-    environment:
-      - JENKINS_URL=http://jenkins-master:8080/jenkins
-      - JENKINS_AGENT_NAME=agent1
-      - JENKINS_AGENT_SECRET=6962729d601d01c6b9f55390567cf4f1b81b0e1f6c889cbcfe747f745dd6d1ba
-      - JENKINS_AGENT_WORKDIR=/home/jenkins/agent
+    build:
+      context: .
+      dockerfile: dockerfile-python-agent
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - jenkins_agent_home:/home/jenkins/agent
-    command: -url http://jenkins-master:8080 6962729d601d01c6b9f55390567cf4f1b81b0e1f6c889cbcfe747f745dd6d1ba agent1
+      - jenkins_agent_home:/home/jenkins
+    command: -url http://jenkins-master:8080/jenkins d4d620ed74a27b60293c24b8cc47ccd15a397388cd5f064dfc05b05dc65aa514 python-agent1
     tty: true
     stdin_open: true
     restart: unless-stopped
