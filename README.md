@@ -414,7 +414,7 @@ class XmlHandler:
         return xmltodict.unparse(self._data, pretty=True)
 ```
 
-* XmlElement to handle each xml element as an objects attribute
+* XmlElement to handle each xml element as an object's attribute
 
 ```python
     class XmlElement(dict):
