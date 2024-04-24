@@ -391,12 +391,12 @@ class XmlHandler:
     Handle XML document like an OOP object
     """
 
-        def __init__(self, xml_data: str):
-        self._data = xmltodict.parse(xml_data) # here data is a dictionary
+    def __init__(self, xml_data: str):
+      self._data = xmltodict.parse(xml_data) # here data is a dictionary
 
-        # XML can have only one root
-        root = list(self._data.keys())[0]
-        self._root = XmlElement(self._data[root], parent=self._data)
+      # XML can have only one root
+      root = list(self._data.keys())[0]
+      self._root = XmlElement(self._data[root], parent=self._data)
     
     @property
     def root(self) -> XmlElement:
