@@ -204,7 +204,7 @@ Adding agent can be done with API or *python-jenkins* module but it makes more s
 <img src="pictures/secret-key.png" border=2, width=50%>
 </p>
 
-* Final step is to update [docker-compose.yaml](./docker/docker-compose.yaml) file
+* Final step is to update [docker-compose.yaml](./docker/docker-compose.yaml) file, replace *XXXXX...* with *secret* token
 ```yaml
 version: '3.8'
 services:
