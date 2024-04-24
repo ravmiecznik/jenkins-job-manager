@@ -459,7 +459,7 @@ class XmlHandler:
 
     def __setitem__(self, key, value):
         """
-        Sets value into parent's key Keeping the context of parent is substantial to access chained attributes
+        Sets value into parent's key. Keeping the context of parent is substantial to access chained attributes
         @param key: key
         @param value: value to set
         @return:
