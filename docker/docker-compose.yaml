@@ -23,7 +23,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - jenkins_agent_home:/home/jenkins
-    command: -url http://jenkins-master:8080/jenkins d4d620ed74a27b60293c24b8cc47ccd15a397388cd5f064dfc05b05dc65aa514 python-agent1
+    command: -url http://jenkins-master:8080/jenkins 9ab8cc3b508ba2ba40f729c1ede4fb40c88a841a435aeb67299daf6ad05de299 python-agent1
     tty: true
     stdin_open: true
     restart: unless-stopped

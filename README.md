@@ -87,7 +87,7 @@ You can build customized image now with:
 ```bash
 $ docker build -t python-agent -f ./dockerfile-python-agent .
 ```
-but lets skip it as this will be part of `docker-compose` file which should simplify mainatance of the system.
+but lets skip it as this will be part of `docker-compose` file which should simplify maintenance of the system.
 
 
 ## Jenkins controller docker-compose
@@ -282,10 +282,194 @@ Finished: SUCCESS
 ## So that's it for the first part. In the second part, I am going to show how to use Python to manage Jenkins jobs.
 
 
+
+## Jenkins API
+
+Jenkins offers a rich set of functionalities via its REST API, allowing you to automate and interact with Jenkins programmatically. Here's a list of common actions you can perform over the Jenkins API:
+
+* Build Management
+    * Trigger a build for a specific job.
+    * Retrieve the status and details of a build.
+    * Cancel or stop a running build.
+* Job Management
+    * List all jobs in Jenkins.
+    * Create a new job.
+    * Delete an existing job.
+    * Update job configuration.
+    * Retrieve job configuration.
+    * Enable/disable a job.
+* Build Queue Management
+    * List all items in the build queue.
+    * Cancel or remove items from the build queue.
+* Node Management
+    * List all nodes (Jenkins agents).
+    * Get details about a specific node.
+    * Enable/disable a node.
+    * Delete a node.
+* User and Role Management
+    * List all users.
+    * Get user details.
+    * Create/update/delete user roles and permissions.
+* Plugin Management
+    * List all installed plugins.
+    * Install new plugins.
+    * Uninstall plugins.
+    * Get plugin details.
+* Credential Management
+    * List all stored credentials.
+    * Add/update/delete credentials.
+* Build Artifact Management
+    * Download build artifacts.
+    * List build artifacts.
+* System Information
+    * Get Jenkins system information.
+    * Retrieve Jenkins version and system health status.
+* and more
+
+
+In order to use API we will need get Jenkins API token (https://www.jenkins.io/doc/book/managing/cli/#authentication) but first we need to create a user:
+* Install `Role-based Authorization Strategy` plugin http://localhost:8080/jenkins/manage/pluginManager/available
+* In *Manage Jenkins -> Security* set:
+<p align="center">
+<img src="pictures/security-settings.png" border=2, width=50%>
+</p>
+
+* create new user: http://localhost:8080/jenkins/manage/securityRealm/addUser
+* logout from *Administrator* account and log in as newly created user, in my case new user is *tester*
+* Create API token for *tester* user: http://localhost:8080/jenkins/me/configure
+<p align="center">
+<img src="pictures/token-creation.png" border=2, width=50%>
+</p>
+
+* store this token, the best is to use [*.netrc* ](https://www.gnu.org/software/inetutils/manual/html_node/The-_002enetrc-file.html) file 
+  * just add such line in your `$HOME\.netrc` on you machine (replace `XXX` with generated token):
+  ```bash
+  echo "machine localhost:8080 login tester password XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" >> ~/.netrc
+  ```
+
 ## Python support for Jenkins 
-#### Jenkins API/CLI
-#### *python-jenkins* module
-#### XML parsing/unparsing with *xmltodict* module
+
+In this tutorial we will focus on jobs creation, configuration and reconfiguration. This can turn out to be very helpful in case there is larger number of jobs to be maintained. Very often it happens jobs share some common logic or can depend on each other. Keeping that dependency is much easier if we apply a programmatic approach like Python.<br>
+I am going to use [python-jenkins](https://python-jenkins.readthedocs.io/) module for that. It offers most of the features listed above. 
+```bash
+pip install python-jenkins
+```
+
+Having all setup lets create first Job:<br>
+```python
+import jenkins
+from pprint import pprint
+import lib.jenkins_api as jenkins_api
+server = jenkins_api.get_jenkins_server()
+server.create_job('dummy job', jenkins.EMPTY_CONFIG_XML)
+pprint(server.get_all_jobs())
+```
+
+this should print:
+```
+[{'_class': 'hudson.model.FreeStyleProject',
+  'color': 'notbuilt',
+  'fullname': 'dummy job',
+  'name': 'dummy job',
+  'url': 'http://localhost:8080/jenkins/job/dummy%20job/'}]
+```
+and this job should also be visible on our Jenkins dashboard. As we can see *python-jenkins* module uses xml file `jenkins.EMPTY_CONFIG_XML` as basis to configure project. Any project created on Jenkins has its own *config.xml* file. Once we created *dummy job* we can check this at this URL:<br>http://localhost:8080/jenkins/job/dummy%20job/config.xml<br>
+To discover what kind of xml pieces we need to build a job according to our requirements we can create a draft job with web-ui interface and check generated *config.xml* to see what is needed. 
+
+## XML parsing/unparsing with *xmltodict* module
+As shown earlier, we're using XML to manage our Jenkins setup. XML (eXtensible Markup Language) is a standard markup language for encoding documents in a structured, human-readable, and machine-readable way. It was designed to store and transport data, providing a flexible framework for representing data structures. While Python has an xml module for parsing XML files, a more user-friendly alternative lets you treat XML as a dictionary, simplifying data handling:
+```cli
+pip install xmltodict
+```
+
+With this module, we can make Jenkins integration more Pythonic. I will demonstrate how to navigate an XML structure as if you're accessing object attributes, just like in most object-oriented programming languages.<br>
+In [xml_handler.py](./lib/xml_handler.py) file are two classes which allows that kind of mechanism
+* XmlHandler to parse and unparse XML document
+```python
+class XmlHandler:
+    """
+    Handle XML document like an OOP object
+    """
+
+        def __init__(self, xml_data: str):
+        self._data = xmltodict.parse(xml_data) # here data is a dictionary
+
+        # XML can have only one root
+        root = list(self._data.keys())[0]
+        self._root = XmlElement(self._data[root], parent=self._data)
+    
+    @property
+    def root(self) -> XmlElement:
+        """
+
+        @return: XmlElement of root
+        """
+        return self._root
+
+    def unparse(self) -> str:
+        """
+        Make XML document out of dict object
+        @return: xml as string
+        """
+        return xmltodict.unparse(self._data, pretty=True)
+```
+
+* XmlElement to handle each xml element as an objects attribute
+
+```python
+    class XmlElement(dict):
+    """
+    Defines mechanism to access and modify dict keys as an object attribute
+    """
+    def __init__(self, value, parent=None):
+        """
+
+        @param value: input value
+        @param parent: parent to keep track of attribute calls
+        """
+        self._dict_parent = parent
+
+        # Element can be a dictionary or a plain value like string or int, super-class constructor can run only for dict objects
+        if issubclass(type(value), dict):
+            dict.__init__(self, value)
+
+    def __getitem__(self, item):
+        data = dict.__getitem__(self, item)
+        if isinstance(data, dict):
+            # Return new XmlElement if an element is another dictionary
+            return XmlElement(data, parent=data)
+        else:
+            # Return plain data
+            return data
+
+    def __getattr__(self, item):
+        """
+        Allows to access dictionary elements by key just like an attribute
+        """
+        return self.__getitem__(item)
+
+    def __setattr__(self, key: str, value):
+        """
+        Allows to assign new value for dictionary key with setattr method
+        """
+        if key.startswith("_"):
+            object.__setattr__(self, key, value)
+        else:
+            self[key] = value
+
+    def __setitem__(self, key, value):
+        """
+        Sets value into parent's key Keeping the context of parent is substantial to access chained attributes
+        @param key: key
+        @param value: value to set
+        @return:
+        """
+        self._dict_parent[key] = value
+
+```
+
+
+
 #### How to make XML parsing simpler with Python low level feateures
 #### Putting it all together with CLI based script (*argparse* with subparsers)
 
