@@ -12,7 +12,7 @@ def snake_to_camel(snake_str):
     return components[0] + "".join(x.capitalize() or "_" for x in components[1:])
 
 
-def keys_to_camel_case(**kwargs):
+def keys_to_camel_case(kwargs):
     """
     Convert dict keys to camel case for XML compatibility
     @param kwargs: dictionary

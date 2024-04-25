@@ -549,7 +549,7 @@ print(xml_obj.unparse())
 server.reconfig_job('dummy job', config_xml=xml_obj.unparse())
 ```
 
-This is how updated xml looks like with new *description* element
+This is how updated xml looks like with new *description* element and set of new string parameters
 ```cli
 <?xml version="1.0" encoding="utf-8"?>
 <project>
@@ -585,22 +585,88 @@ This is how updated xml looks like with new *description* element
 </project>
 ```
 
-From *Dummy Job* view we can that config was updated:
+From *Dummy Job* view we can see that config was updated:
 http://localhost:8080/jenkins/job/Dummy%20Job/build
 
 <p align="center">
 <img src="./pictures/adding-parameters.png" border=2, width=50%>
 </p>
 
+That was a showcase how can those tools can be used. Lets create something useful then. We can create new classes in Python now to create many different templates of different types of Jobs we need like:
+* freestyle job
+* pipeline job
+* folder
+* etc
 
-#### How to make XML parsing simpler with Python low level feateures
-#### Putting it all together with CLI based script (*argparse* with subparsers)
+We need to know how xml structure looks like for each item we want to create on Jenkins. You can create some example Item on Jenkins web-ui and see how *config.xml* looks like. Basically this is the simples way to create a single job. Examples and tools shown here are more practical when you want to manage bigger number of jobs.<br>
 
-* https://www.jenkins.io/doc/book/managing/cli/#authentication
-* http://localhost:8080/jenkins/me/configure
-<!-- Let's add the Agent to Jenkins controller:
-* open *Manage Jenkins* on Jenkins home page ([picture above](#jenkins-initial-view))
-* select *Nodes (Add, remove, control and monitor)* -->
+In [job_manager.py](./lib/job_manager.py) file are defined template classes to create a Freestyle job but if course this is just single example how you can use this approach to create and manage your own kinds of Jobs.<br>
+Here is a short snippet which creates fully operational Job with few parameters. It also shows how can we simply render a shell script based of defined parameters:
+```python
+import lib.jenkins_api as jenkins_api
+import lib.job_manager as job_manager
+
+server = jenkins_api.get_jenkins_server()
+
+# Get 'dummy job' config.xml
+xml_data = server.get_job_config('dummy job')
+
+# Create freestyle job
+freestyle_job = job_manager.FreestyleJob(description='new dummy job')
+
+# Add string parameters to the job
+parameter1 = 'Param1'
+parameter2 = 'Param2'
+freestyle_job.add_job_parameter(parameter1, description='first parameter', default_value='val1')
+freestyle_job.add_job_parameter(parameter2, description='second parameter', default_value='val2')
+
+# Add choices parameter
+platform_parameter = 'platform'
+freestyle_job.add_job_choices_parameter(platform_parameter, choices=['linux', 'windows'], description='choose platform')
+
+# Add artifact archiver, collect log file produced by shell script below
+freestyle_job.add_artifact_archiver('*.log')
+
+# Define builder shell script
+freestyle_job.add_builder_shell_script(
+    f'''
+    echo Selected platform: ${platform_parameter}
+    echo Executing job with parameters {parameter1}=${parameter1}, {parameter2}=${parameter2}
+    pip list | tee text.log
+    '''
+)
 
 
+server.reconfig_job('dummy job', config_xml=freestyle_job.unparse())
+```
 
+Now lets see how it looks:
+<p align="center">
+<img src="./pictures/updated-parameters.png" border=2, width=50%>
+</p>
+
+After building the Job here is how console output looks like:
+
+```cli
+Started by user unknown or anonymous
+Running as SYSTEM
+Building remotely on python-agent1 in workspace /home/jenkins/workspace/dummy job
+[dummy job] $ /bin/sh -xe /tmp/jenkins6729820319219664139.sh
++ echo Selected platform: linux
+Selected platform: linux
++ echo Executing job with parameters Param1=val1, Param2=val2
+Executing job with parameters Param1=val1, Param2=val2
++ pip list
++ tee text.log
+Package            Version
+------------------ ------------
+astroid            2.14.2
+attrs              22.2.0
+...
+```
+
+As you can see all values were correctly placed in a shell script. There is also an artifact collected according to `freestyle_job.add_artifact_archiver('*.log')` expression which contains output of `pip list` command
+
+<p align="center">
+<img src="./pictures/build-view.png" border=2, width=50%>
+</p>
