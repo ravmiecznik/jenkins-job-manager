@@ -390,84 +390,207 @@ class XmlHandler:
     """
     Handle XML document like an OOP object
     """
-
     def __init__(self, xml_data: str):
-      self._data = xmltodict.parse(xml_data) # here data is a dictionary
-
-      # XML can have only one root
-      root = list(self._data.keys())[0]
-      self._root = XmlElement(self._data[root], parent=self._data)
+        self._data = XmlElement(xmltodict.parse(xml_data))
     
     @property
-    def root(self) -> XmlElement:
+    def data(self) -> XmlElement:
         """
 
         @return: XmlElement of root
         """
-        return self._root
+        return self._data
 
     def unparse(self) -> str:
         """
-        Make XML document out of dict object
+
         @return: xml as string
         """
         return xmltodict.unparse(self._data, pretty=True)
+    
+    def __repr__(self):
+        return pformat(self._data)
 ```
 
 * XmlElement to handle each xml element as an object's attribute
 
 ```python
-    class XmlElement(dict):
+class XmlElement(dict):
     """
-    Defines mechanism to access and modify dict keys as an object attribute
+    Defines mechanism to access and modify dict keys as an object's attribute
     """
-    def __init__(self, value, parent=None):
-        """
-
-        @param value: input value
-        @param parent: parent to keep track of attribute calls
-        """
-        self._dict_parent = parent
-
-        # Element can be a dictionary or a plain value like string or int, super-class constructor can run only for dict objects
-        if issubclass(type(value), dict):
-            dict.__init__(self, value)
-
-    def __getitem__(self, item):
-        data = dict.__getitem__(self, item)
-        if isinstance(data, dict):
-            # Return new XmlElement if an element is another dictionary
-            return XmlElement(data, parent=data)
-        else:
-            # Return plain data
-            return data
-
-    def __getattr__(self, item):
-        """
-        Allows to access dictionary elements by key just like an attribute
-        """
-        return self.__getitem__(item)
 
     def __setattr__(self, key: str, value):
         """
-        Allows to assign new value for dictionary key with setattr method
-        """
-        if key.startswith("_"):
-            object.__setattr__(self, key, value)
-        else:
-            self[key] = value
-
-    def __setitem__(self, key, value):
-        """
-        Sets value into parent's key. Keeping the context of parent is substantial to access chained attributes
+        Assign value to dict key by __setattr__
         @param key: key
-        @param value: value to set
+        @param value: value
+        @return: 
+        """
+        if not key.startswith('_'):
+            self[key] = value
+        else:
+            super().__setattr__(key, value)
+
+    def __getattr__(self, item):
+        """
+        Allow to get dict item with getattr method
+        @param item: dict key
+        @return: plain data or new XmlElement
+        """
+        data = super().__getitem__(item)
+        if issubclass(type(data), dict):
+            xml_element = XmlElement(data)
+            super().__setitem__(item, xml_element)  # reassign current element with new instance of XmlElement
+        return super().__getitem__(item)
+
+    def __getitem__(self, item):
+        """
+        Override getitem so it will return new XmlElement if element is type of dict, reuse __getattr__ implementation
+        @param item:
         @return:
         """
-        self._dict_parent[key] = value
+        return self.__getattr__(item)
 
 ```
 
+Lets see how it works. Here a default `jenkins.EMPTY_CONFIG_XML` used to create *dummy job*, the same is visible under http://localhost:8080/jenkins/job/Dummy%20Job/config.xml
+```xml
+<?xml version="1.0" encoding="UTF-8"?><project>
+  <keepDependencies>false</keepDependencies>
+  <properties/>
+  <scm class="jenkins.scm.NullSCM"/>
+  <canRoam>true</canRoam>
+  <disabled>false</disabled>
+  <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
+  <triggers class="vector"/>
+  <concurrentBuild>false</concurrentBuild>
+  <builders/>
+  <publishers/>
+  <buildWrappers/>
+</project>
+<?xml version="1.0" encoding="utf-8"?>
+```
+
+Now lets make an *XmlHandler* object out of it:
+
+```python
+import lib.jenkins_api as jenkins_api
+import lib.xml_handler as xml_handler
+
+server = jenkins_api.get_jenkins_server()
+
+xml_data = server.get_job_config('dummy job')
+xml_obj = xml_handler.XmlHandler(xml_data)
+
+print(xml_obj)
+```
+
+As we expected we have the same structure in form of nice looking dictionary:
+```
+{'project': {'blockBuildWhenUpstreamBuilding': 'false',
+             'buildWrappers': None,
+             'builders': None,
+             'canRoam': 'true',
+             'concurrentBuild': 'false',
+             'disabled': 'false',
+             'keepDependencies': 'false',
+             'properties': None,
+             'publishers': None,
+             'scm': {'@class': 'jenkins.scm.NullSCM'},
+             'triggers': {'@class': 'vector'}}}
+```
+
+To show how to update jenkins job with demonstrated tools I am going to add description to the job:
+
+
+```python
+import lib.jenkins_api as jenkins_api
+import lib.xml_handler as xml_handler
+
+server = jenkins_api.get_jenkins_server()
+
+# Get dummy job config.xml
+xml_data = server.get_job_config('dummy job')
+
+xml_obj = xml_handler.XmlHandler(xml_data)
+
+xml_data = xml_obj.data
+
+# Adding description to job
+xml_data.project.description = "This is dummy job for demonstration purposes"
+
+# Adding new field 'properties' which stores ParametersDefinitionProperty
+xml_data.project.properties = {
+    'hudson.model.ParametersDefinitionProperty':
+        {
+            'parameterDefinitions': {}
+        }
+}
+
+# Let's grab parameterDefinitions list context
+parameter_definitions = xml_data.project.properties['hudson.model.ParametersDefinitionProperty'].parameterDefinitions
+parameter_definitions['hudson.model.StringParameterDefinition'] = [] # for many parameters of the same type use list
+
+# Adding new Job parameters
+parameters = [
+    dict(name='parameter1', description='this is dummy parameter 1', default_value='0'),
+    dict(name='parameter2', description='this is dummy parameter 2', default_value='1'),
+]
+
+for parameter_dict in parameters:
+    parameter_definitions['hudson.model.StringParameterDefinition'].append(
+        # Jenkins XML element names must be camel case
+        xml_handler.keys_to_camel_case(**parameter_dict)
+    )
+
+
+print(xml_obj.unparse())
+server.reconfig_job('dummy job', config_xml=xml_obj.unparse())
+```
+
+This is how updated xml looks like with new *description* element
+```cli
+<?xml version="1.0" encoding="utf-8"?>
+<project>
+	<actions></actions>
+	<description>This is dummy job for demonstration purposes</description>
+	<keepDependencies>false</keepDependencies>
+	<properties>
+		<hudson.model.ParametersDefinitionProperty>
+			<parameterDefinitions>
+				<hudson.model.StringParameterDefinition>
+					<name>parameter1</name>
+					<description>this is dummy parameter 1</description>
+					<defaultValue>0</defaultValue>
+				</hudson.model.StringParameterDefinition>
+				<hudson.model.StringParameterDefinition>
+					<name>parameter2</name>
+					<description>this is dummy parameter 2</description>
+					<defaultValue>1</defaultValue>
+				</hudson.model.StringParameterDefinition>
+			</parameterDefinitions>
+		</hudson.model.ParametersDefinitionProperty>
+	</properties>
+	<scm class="hudson.scm.NullSCM"></scm>
+	<canRoam>true</canRoam>
+	<disabled>false</disabled>
+	<blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
+	<blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
+	<triggers></triggers>
+	<concurrentBuild>false</concurrentBuild>
+	<builders></builders>
+	<publishers></publishers>
+	<buildWrappers></buildWrappers>
+</project>
+```
+
+From *Dummy Job* view we can that config was updated:
+http://localhost:8080/jenkins/job/Dummy%20Job/build
+
+<p align="center">
+<img src="./pictures/adding-parameters.png" border=2, width=50%>
+</p>
 
 
 #### How to make XML parsing simpler with Python low level feateures
