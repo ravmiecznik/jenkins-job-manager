@@ -87,7 +87,7 @@ You can build customized image now with:
 ```bash
 $ docker build -t python-agent -f ./dockerfile-python-agent .
 ```
-but lets skip it as this will be part of `docker-compose` file which should simplify mainatance of the system.
+but lets skip it as this will be part of `docker-compose` file which should simplify maintenance of the system.
 
 
 ## Jenkins controller docker-compose
@@ -282,18 +282,391 @@ Finished: SUCCESS
 ## So that's it for the first part. In the second part, I am going to show how to use Python to manage Jenkins jobs.
 
 
+
+## Jenkins API
+
+Jenkins offers a rich set of functionalities via its REST API, allowing you to automate and interact with Jenkins programmatically. Here's a list of common actions you can perform over the Jenkins API:
+
+* Build Management
+    * Trigger a build for a specific job.
+    * Retrieve the status and details of a build.
+    * Cancel or stop a running build.
+* Job Management
+    * List all jobs in Jenkins.
+    * Create a new job.
+    * Delete an existing job.
+    * Update job configuration.
+    * Retrieve job configuration.
+    * Enable/disable a job.
+* Build Queue Management
+    * List all items in the build queue.
+    * Cancel or remove items from the build queue.
+* Node Management
+    * List all nodes (Jenkins agents).
+    * Get details about a specific node.
+    * Enable/disable a node.
+    * Delete a node.
+* User and Role Management
+    * List all users.
+    * Get user details.
+    * Create/update/delete user roles and permissions.
+* Plugin Management
+    * List all installed plugins.
+    * Install new plugins.
+    * Uninstall plugins.
+    * Get plugin details.
+* Credential Management
+    * List all stored credentials.
+    * Add/update/delete credentials.
+* Build Artifact Management
+    * Download build artifacts.
+    * List build artifacts.
+* System Information
+    * Get Jenkins system information.
+    * Retrieve Jenkins version and system health status.
+* and more
+
+
+In order to use API we will need get Jenkins API token (https://www.jenkins.io/doc/book/managing/cli/#authentication) but first we need to create a user:
+* Install `Role-based Authorization Strategy` plugin http://localhost:8080/jenkins/manage/pluginManager/available
+* In *Manage Jenkins -> Security* set:
+<p align="center">
+<img src="pictures/security-settings.png" border=2, width=50%>
+</p>
+
+* create new user: http://localhost:8080/jenkins/manage/securityRealm/addUser
+* logout from *Administrator* account and log in as newly created user, in my case new user is *tester*
+* Create API token for *tester* user: http://localhost:8080/jenkins/me/configure
+<p align="center">
+<img src="pictures/token-creation.png" border=2, width=50%>
+</p>
+
+* store this token, the best is to use [*.netrc* ](https://www.gnu.org/software/inetutils/manual/html_node/The-_002enetrc-file.html) file 
+  * just add such line in your `$HOME\.netrc` on you machine (replace `XXX` with generated token):
+  ```bash
+  echo "machine localhost:8080 login tester password XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" >> ~/.netrc
+  ```
+
 ## Python support for Jenkins 
-#### Jenkins API/CLI
-#### *python-jenkins* module
-#### XML parsing/unparsing with *xmltodict* module
-#### How to make XML parsing simpler with Python low level feateures
-#### Putting it all together with CLI based script (*argparse* with subparsers)
 
-* https://www.jenkins.io/doc/book/managing/cli/#authentication
-* http://localhost:8080/jenkins/me/configure
-<!-- Let's add the Agent to Jenkins controller:
-* open *Manage Jenkins* on Jenkins home page ([picture above](#jenkins-initial-view))
-* select *Nodes (Add, remove, control and monitor)* -->
+In this tutorial we will focus on jobs creation, configuration and reconfiguration. This can turn out to be very helpful in case there is larger number of jobs to be maintained. Very often it happens jobs share some common logic or can depend on each other. Keeping that dependency is much easier if we apply a programmatic approach like Python.<br>
+I am going to use [python-jenkins](https://python-jenkins.readthedocs.io/) module for that. It offers most of the features listed above. 
+```bash
+pip install python-jenkins
+```
+
+Having all setup lets create first Job:<br>
+```python
+import jenkins
+from pprint import pprint
+import lib.jenkins_api as jenkins_api
+server = jenkins_api.get_jenkins_server()
+server.create_job('dummy job', jenkins.EMPTY_CONFIG_XML)
+pprint(server.get_all_jobs())
+```
+
+this should print:
+```
+[{'_class': 'hudson.model.FreeStyleProject',
+  'color': 'notbuilt',
+  'fullname': 'dummy job',
+  'name': 'dummy job',
+  'url': 'http://localhost:8080/jenkins/job/dummy%20job/'}]
+```
+and this job should also be visible on our Jenkins dashboard. As we can see *python-jenkins* module uses xml file `jenkins.EMPTY_CONFIG_XML` as basis to configure project. Any project created on Jenkins has its own *config.xml* file. Once we created *dummy job* we can check this at this URL:<br>http://localhost:8080/jenkins/job/dummy%20job/config.xml<br>
+To discover what kind of xml pieces we need to build a job according to our requirements we can create a draft job with web-ui interface and check generated *config.xml* to see what is needed. 
+
+## XML parsing/unparsing with *xmltodict* module
+As shown earlier, we're using XML to manage our Jenkins setup. XML (eXtensible Markup Language) is a standard markup language for encoding documents in a structured, human-readable, and machine-readable way. It was designed to store and transport data, providing a flexible framework for representing data structures. While Python has an xml module for parsing XML files, a more user-friendly alternative lets you treat XML as a dictionary, simplifying data handling:
+```cli
+pip install xmltodict
+```
+
+With this module, we can make Jenkins integration more Pythonic. I will demonstrate how to navigate an XML structure as if you're accessing object attributes, just like in most object-oriented programming languages.<br>
+In [xml_handler.py](./lib/xml_handler.py) file are two classes which allows that kind of mechanism
+* XmlHandler to parse and unparse XML document
+```python
+class XmlHandler:
+    """
+    Handle XML document like an OOP object
+    """
+    def __init__(self, xml_data: str):
+        self._data = XmlElement(xmltodict.parse(xml_data))
+    
+    @property
+    def data(self) -> XmlElement:
+        """
+
+        @return: XmlElement of root
+        """
+        return self._data
+
+    def unparse(self) -> str:
+        """
+
+        @return: xml as string
+        """
+        return xmltodict.unparse(self._data, pretty=True)
+    
+    def __repr__(self):
+        return pformat(self._data)
+```
+
+* XmlElement to handle each xml element as an object's attribute
+
+```python
+class XmlElement(dict):
+    """
+    Defines mechanism to access and modify dict keys as an object's attribute
+    """
+
+    def __setattr__(self, key: str, value):
+        """
+        Assign value to dict key by __setattr__
+        @param key: key
+        @param value: value
+        @return: 
+        """
+        if not key.startswith('_'):
+            self[key] = value
+        else:
+            super().__setattr__(key, value)
+
+    def __getattr__(self, item):
+        """
+        Allow to get dict item with getattr method
+        @param item: dict key
+        @return: plain data or new XmlElement
+        """
+        data = super().__getitem__(item)
+        if issubclass(type(data), dict):
+            xml_element = XmlElement(data)
+            super().__setitem__(item, xml_element)  # reassign current element with new instance of XmlElement
+        return super().__getitem__(item)
+
+    def __getitem__(self, item):
+        """
+        Override getitem so it will return new XmlElement if element is type of dict, reuse __getattr__ implementation
+        @param item:
+        @return:
+        """
+        return self.__getattr__(item)
+
+```
+
+Lets see how it works. Here a default `jenkins.EMPTY_CONFIG_XML` used to create *dummy job*, the same is visible under http://localhost:8080/jenkins/job/Dummy%20Job/config.xml
+```xml
+<?xml version="1.0" encoding="UTF-8"?><project>
+  <keepDependencies>false</keepDependencies>
+  <properties/>
+  <scm class="jenkins.scm.NullSCM"/>
+  <canRoam>true</canRoam>
+  <disabled>false</disabled>
+  <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
+  <triggers class="vector"/>
+  <concurrentBuild>false</concurrentBuild>
+  <builders/>
+  <publishers/>
+  <buildWrappers/>
+</project>
+<?xml version="1.0" encoding="utf-8"?>
+```
+
+Now lets make an *XmlHandler* object out of it:
+
+```python
+import lib.jenkins_api as jenkins_api
+import lib.xml_handler as xml_handler
+
+server = jenkins_api.get_jenkins_server()
+
+xml_data = server.get_job_config('dummy job')
+xml_obj = xml_handler.XmlHandler(xml_data)
+
+print(xml_obj)
+```
+
+As we expected we have the same structure in form of nice looking dictionary:
+```
+{'project': {'blockBuildWhenUpstreamBuilding': 'false',
+             'buildWrappers': None,
+             'builders': None,
+             'canRoam': 'true',
+             'concurrentBuild': 'false',
+             'disabled': 'false',
+             'keepDependencies': 'false',
+             'properties': None,
+             'publishers': None,
+             'scm': {'@class': 'jenkins.scm.NullSCM'},
+             'triggers': {'@class': 'vector'}}}
+```
+
+To show how to update jenkins job with demonstrated tools I am going to add description to the job:
 
 
+```python
+import lib.jenkins_api as jenkins_api
+import lib.xml_handler as xml_handler
 
+server = jenkins_api.get_jenkins_server()
+
+# Get dummy job config.xml
+xml_data = server.get_job_config('dummy job')
+
+xml_obj = xml_handler.XmlHandler(xml_data)
+
+xml_data = xml_obj.data
+
+# Adding description to job
+xml_data.project.description = "This is dummy job for demonstration purposes"
+
+# Adding new field 'properties' which stores ParametersDefinitionProperty
+xml_data.project.properties = {
+    'hudson.model.ParametersDefinitionProperty':
+        {
+            'parameterDefinitions': {}
+        }
+}
+
+# Let's grab parameterDefinitions list context
+parameter_definitions = xml_data.project.properties['hudson.model.ParametersDefinitionProperty'].parameterDefinitions
+parameter_definitions['hudson.model.StringParameterDefinition'] = [] # for many parameters of the same type use list
+
+# Adding new Job parameters
+parameters = [
+    dict(name='parameter1', description='this is dummy parameter 1', default_value='0'),
+    dict(name='parameter2', description='this is dummy parameter 2', default_value='1'),
+]
+
+for parameter_dict in parameters:
+    parameter_definitions['hudson.model.StringParameterDefinition'].append(
+        # Jenkins XML element names must be camel case
+        xml_handler.keys_to_camel_case(**parameter_dict)
+    )
+
+
+print(xml_obj.unparse())
+server.reconfig_job('dummy job', config_xml=xml_obj.unparse())
+```
+
+This is how updated xml looks like with new *description* element and set of new string parameters
+```cli
+<?xml version="1.0" encoding="utf-8"?>
+<project>
+	<actions></actions>
+	<description>This is dummy job for demonstration purposes</description>
+	<keepDependencies>false</keepDependencies>
+	<properties>
+		<hudson.model.ParametersDefinitionProperty>
+			<parameterDefinitions>
+				<hudson.model.StringParameterDefinition>
+					<name>parameter1</name>
+					<description>this is dummy parameter 1</description>
+					<defaultValue>0</defaultValue>
+				</hudson.model.StringParameterDefinition>
+				<hudson.model.StringParameterDefinition>
+					<name>parameter2</name>
+					<description>this is dummy parameter 2</description>
+					<defaultValue>1</defaultValue>
+				</hudson.model.StringParameterDefinition>
+			</parameterDefinitions>
+		</hudson.model.ParametersDefinitionProperty>
+	</properties>
+	<scm class="hudson.scm.NullSCM"></scm>
+	<canRoam>true</canRoam>
+	<disabled>false</disabled>
+	<blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
+	<blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
+	<triggers></triggers>
+	<concurrentBuild>false</concurrentBuild>
+	<builders></builders>
+	<publishers></publishers>
+	<buildWrappers></buildWrappers>
+</project>
+```
+
+From *Dummy Job* view we can see that config was updated:
+http://localhost:8080/jenkins/job/Dummy%20Job/build
+
+<p align="center">
+<img src="./pictures/adding-parameters.png" border=2, width=50%>
+</p>
+
+That was a showcase how can those tools can be used. Lets create something useful then. We can create new classes in Python now to create many different templates of different types of Jobs we need like:
+* freestyle job
+* pipeline job
+* folder
+* etc
+
+We need to know how xml structure looks like for each item we want to create on Jenkins. You can create some example Item on Jenkins web-ui and see how *config.xml* looks like. Basically this is the simples way to create a single job. Examples and tools shown here are more practical when you want to manage bigger number of jobs.<br>
+
+In [job_manager.py](./lib/job_manager.py) file are defined template classes to create a Freestyle job but if course this is just single example how you can use this approach to create and manage your own kinds of Jobs.<br>
+Here is a short snippet which creates fully operational Job with few parameters. It also shows how can we simply render a shell script based of defined parameters:
+```python
+import lib.jenkins_api as jenkins_api
+import lib.job_manager as job_manager
+
+server = jenkins_api.get_jenkins_server()
+
+# Get 'dummy job' config.xml
+xml_data = server.get_job_config('dummy job')
+
+# Create freestyle job
+freestyle_job = job_manager.FreestyleJob(description='new dummy job')
+
+# Add string parameters to the job
+parameter1 = 'Param1'
+parameter2 = 'Param2'
+freestyle_job.add_job_parameter(parameter1, description='first parameter', default_value='val1')
+freestyle_job.add_job_parameter(parameter2, description='second parameter', default_value='val2')
+
+# Add choices parameter
+platform_parameter = 'platform'
+freestyle_job.add_job_choices_parameter(platform_parameter, choices=['linux', 'windows'], description='choose platform')
+
+# Add artifact archiver, collect log file produced by shell script below
+freestyle_job.add_artifact_archiver('*.log')
+
+# Define builder shell script
+freestyle_job.add_builder_shell_script(
+    f'''
+    echo Selected platform: ${platform_parameter}
+    echo Executing job with parameters {parameter1}=${parameter1}, {parameter2}=${parameter2}
+    pip list | tee text.log
+    '''
+)
+
+
+server.reconfig_job('dummy job', config_xml=freestyle_job.unparse())
+```
+
+Now lets see how it looks:
+<p align="center">
+<img src="./pictures/updated-parameters.png" border=2, width=50%>
+</p>
+
+After building the Job here is how console output looks like:
+
+```cli
+Started by user unknown or anonymous
+Running as SYSTEM
+Building remotely on python-agent1 in workspace /home/jenkins/workspace/dummy job
+[dummy job] $ /bin/sh -xe /tmp/jenkins6729820319219664139.sh
++ echo Selected platform: linux
+Selected platform: linux
++ echo Executing job with parameters Param1=val1, Param2=val2
+Executing job with parameters Param1=val1, Param2=val2
++ pip list
++ tee text.log
+Package            Version
+------------------ ------------
+astroid            2.14.2
+attrs              22.2.0
+...
+```
+
+As you can see all values were correctly placed in a shell script. There is also an artifact collected according to `freestyle_job.add_artifact_archiver('*.log')` expression which contains output of `pip list` command
+
+<p align="center">
+<img src="./pictures/build-view.png" border=2, width=50%>
+</p>

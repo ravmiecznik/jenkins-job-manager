@@ -1,0 +1,13 @@
+Explanation:
+
+The jenkins-master service is your Jenkins server.
+The jenkins-agent service is configured to connect to the Jenkins master.
+depends_on: Ensures that the Jenkins agent starts after the master.
+JENKINS_URL: URL for the Jenkins master. The service name jenkins-master is used as the hostname.
+JENKINS_AGENT_NAME and JENKINS_AGENT_SECRET: Used for agent authentication. You will need to replace mysecret with the actual secret you get from Jenkins when you set up the agent.
+volumes: Mounts the Docker socket so that the agent can run Docker commands (if needed).
+Setup Jenkins Agent:
+
+After starting Jenkins using docker-compose up, set up a new node in Jenkins:
+Go to "Manage Jenkins" > "Manage Nodes and Clouds".
+Add a new node and configure it with the same name (agent1) and secret (mysecret) as in the Docker Compose file.
